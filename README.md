@@ -15,3 +15,10 @@ This will download OpenSSL, NAsm and Strawberry-Perl (portable) and then
 compile OpenSSL in both debug and release versions for Win32.
 
 The output (including a NuGet package) is put in the `bin` folder.
+
+# License
+
+This project is provided as-is under the MIT license. For more information, see
+`LICENSE`.
+
+ * For OpenSSL, see https://www.openssl.org/source/license.html.
