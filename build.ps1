@@ -186,11 +186,11 @@ function Output-OpenSSL {
 
     pushd $OPENSSL_DIRECTORY
     
-    $t = Join-Path $OUTPUT_DIRECTORY "$platform/$configuration"
+    $t = Join-Path $OUTPUT_DIRECTORY "$platform"
 
     # Copy output files
-    xcopy /y bin\$platform\$configuration\bin\*.dll "$t\bin\*"
-    xcopy /y bin\$platform\$configuration\lib\*.lib "$t\lib\*"
+    xcopy /y bin\$platform\$configuration\bin\*.dll "$t\bin\$configuration\*"
+    xcopy /y bin\$platform\$configuration\lib\*.lib "$t\lib\$configuration\*"
     xcopy /y bin\$platform\$configuration\include\* "$t\include\*" /E
 
     popd
