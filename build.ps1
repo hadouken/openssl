@@ -1,5 +1,29 @@
-# This script will download and build OpenSSL in both debug and release
-# configurations.
+# This script will download and build OpenSSL in debug, release
+# or both configurations for Win32 or x64.
+#
+# Usage:
+# ------
+# build.ps1 [-vs_version 120 | 110 | 100 | 90]
+#           [-config     release | debug | both]
+#           [-platform   Win32 | x64]
+#
+
+[CmdletBinding()]
+Param
+(
+  [Parameter()]
+  [ValidateSet(90, 100, 110, 120)]
+  [int] $vs_version = 110,
+
+  [Parameter()]
+  [ValidateSet('release', 'debug', 'both')]
+  [string] $config = 'release',
+
+  [Parameter()]
+  [ValidateSet('Win32', 'x64')]
+  [string] $platform = 'x64'
+)
+
 
 $PACKAGES_DIRECTORY = Join-Path $PSScriptRoot "packages"
 $OUTPUT_DIRECTORY   = Join-Path $PSScriptRoot "bin"
@@ -29,7 +53,7 @@ $PERL_PACKAGE_FILE = "strawberry-perl-$PERL_VERSION-32bit-portable.zip"
 $PERL_DOWNLOAD_URL = "http://strawberryperl.com/download/5.20.1.1/$PERL_PACKAGE_FILE"
 
 # OpenSSL configuration section
-$OPENSSL_VERSION      = "1.0.2"
+$OPENSSL_VERSION      = "1.0.2a"
 $OPENSSL_DIRECTORY    = Join-Path $PACKAGES_DIRECTORY "openssl-$OPENSSL_VERSION"
 $OPENSSL_PACKAGE_FILE = "openssl-$OPENSSL_VERSION.tar.gz"
 $OPENSSL_DOWNLOAD_URL = "https://www.openssl.org/source/$OPENSSL_PACKAGE_FILE"
@@ -62,16 +86,40 @@ function Extract-File {
 function Load-DevelopmentTools {
     # Set environment variables for Visual Studio Command Prompt
     
-    pushd "c:\Program Files (x86)\Microsoft Visual Studio 12.0\VC"
-    
-    cmd /c "vcvarsall.bat&set" |
-    foreach {
-        if ($_ -match "=") {
-            $v = $_.split("="); set-item -force -path "ENV:\$($v[0])"  -value "$($v[1])"
-        }
+    if ($vs_version -eq 0)
+    {
+      if     ($Env:VS120COMNTOOLS -ne '') { $script:vs_version = 120 }
+      elseif ($Env:VS110COMNTOOLS -ne '') { $script:vs_version = 110 }
+      elseif ($Env:VS100COMNTOOLS -ne '') { $script:vs_version = 100 }
+      elseif ($Env:VS90COMNTOOLS  -ne '') { $script:vs_version = 90 }
+      else
+      {
+        Write-Host 'Visual Studio not found, exiting.'
+        Exit
+      }
     }
-    
-    popd
+
+    $vsct = "VS$($vs_version)COMNTOOLS"
+    $vsdir = (Get-Item Env:$vsct).Value
+    $Command = ''
+    if ($platform -eq 'x64')
+    {
+      $Command = "$($vsdir)..\..\VC\bin\x86_amd64\vcvarsx86_amd64.bat"
+    }
+    else
+    {
+      $Command = "$($vsdir)vsvars32.bat"
+    }
+
+    $tempFile = [IO.Path]::GetTempFileName()
+    cmd /c " `"$Command`" && set > `"$tempFile`" "
+    Get-Content $tempFile | Foreach-Object {
+      if($_ -match "^(.*?)=(.*)$")
+      {
+        Set-Content "Env:$($matches[1])" $matches[2]
+      }
+    }
+    Remove-Item $tempFile
 }
 
 # Get our dev tools
@@ -130,19 +178,22 @@ if (!(Test-Path $PERL_DIRECTORY)) {
     Extract-File (Join-Path $PACKAGES_DIRECTORY $PERL_PACKAGE_FILE) $PERL_DIRECTORY
 }
 
-# Unpack OpenSSL
-if (!(Test-Path $OPENSSL_DIRECTORY)) {
-    Write-Host "Unpacking $OPENSSL_PACKAGE_FILE"
-    $tmp = Join-Path $PACKAGES_DIRECTORY $OPENSSL_PACKAGE_FILE
+function Unpack-OpenSSL {
+  # Unpack OpenSSL
+    if (!(Test-Path $OPENSSL_DIRECTORY)) {
+        Write-Host "Unpacking $OPENSSL_PACKAGE_FILE"
+        $tmp = Join-Path $PACKAGES_DIRECTORY $OPENSSL_PACKAGE_FILE
 
-    & "$7ZIP_TOOL" x $tmp -o"$PACKAGES_DIRECTORY"
-    & "$7ZIP_TOOL" x $tmp.replace('.gz', '') -o"$PACKAGES_DIRECTORY"
+        & "$7ZIP_TOOL" x $tmp -o"$PACKAGES_DIRECTORY" -y
+        & "$7ZIP_TOOL" x $tmp.replace('.gz', '') -o"$PACKAGES_DIRECTORY" -y
+    }
 }
 
 function Compile-OpenSSL {
     param (
-        [string]$platform,
-        [string]$configuration
+        [string]$winplatform,
+        [string]$configuration,
+        [string]$target
     )
 
     pushd $OPENSSL_DIRECTORY
@@ -156,18 +207,22 @@ function Compile-OpenSSL {
     $env:Path = "$NASM_DIRECTORY;" + $env:Path
 
     # Configure
-    $target = "<invalid>"
+    #$target = "<invalid>"
 
-    if ($configuration -eq "debug") {
-        $target = "debug-VC-WIN32"
-    } else {
-        $target = "VC-WIN32"
-    }
+    #if ($configuration -eq "debug") {
+    #    $target = "debug-VC-WIN64"
+    #} else {
+    #    $target = "VC-WIN64"
+    #}
 
-    perl Configure $target --prefix="bin/$platform/$configuration"
+    perl Configure $target --prefix="bin/$winplatform/$configuration"
     
     # Run nasm
     cmd /c ms\do_nasm.bat
+
+    if ($winplatform -eq "win64") {
+        cmd /c ms\do_win64a
+    }
 
     # Run nmake
     nmake -f ms\ntdll.mak
@@ -180,27 +235,62 @@ function Compile-OpenSSL {
 
 function Output-OpenSSL {
     param (
-        [string]$platform,
+        [string]$winplatform,
         [string]$configuration
     )
 
     pushd $OPENSSL_DIRECTORY
     
-    $t = Join-Path $OUTPUT_DIRECTORY "$platform"
+    $t = Join-Path $OUTPUT_DIRECTORY "$winplatform"
 
     # Copy output files
-    xcopy /y bin\$platform\$configuration\bin\*.dll "$t\bin\$configuration\*"
-    xcopy /y bin\$platform\$configuration\lib\*.lib "$t\lib\$configuration\*"
-    xcopy /y bin\$platform\$configuration\include\* "$t\include\*" /E
+    xcopy /y bin\$winplatform\$configuration\bin\*.dll "$t\bin\$configuration\*"
+    xcopy /y bin\$winplatform\$configuration\lib\*.lib "$t\lib\$configuration\*"
+    xcopy /y bin\$winplatform\$configuration\include\* "$t\include\*" /E
 
     popd
 }
 
-Compile-OpenSSL "win32" "debug"
-Output-OpenSSL  "win32" "debug"
 
-Compile-OpenSSL "win32" "release"
-Output-OpenSSL  "win32" "release"
+
+if ($platform -eq "Win32") {
+    if (Test-Path $OPENSSL_DIRECTORY) {
+        Remove-Item -Recurse -Force $OPENSSL_DIRECTORY
+    }
+
+    Unpack-OpenSSL
+
+    if ($config -eq "debug" -or ($config -eq "both")) {
+        Compile-OpenSSL "win32" "debug" "debug-VC-WIN32"
+        Output-OpenSSL  "win32" "debug"
+    }
+
+    if ($config -eq "release" -or ($config -eq "both")) {
+        Compile-OpenSSL "win32" "release" "VC-WIN32"
+        Output-OpenSSL  "win32" "release"
+    }
+}
+elseif ($platform -eq "x64") {
+    if (Test-Path $OPENSSL_DIRECTORY) {
+        Remove-Item -Recurse -Force $OPENSSL_DIRECTORY
+    }
+
+    Unpack-OpenSSL
+
+    if ($config -eq "debug" -or ($config -eq "both")) {
+        Compile-OpenSSL "win64" "debug" "debug-VC-WIN64A"
+        Output-OpenSSL  "win64" "debug"
+    }
+
+    if ($config -eq "release" -or ($config -eq "both")) {
+        Compile-OpenSSL "win64" "release" "VC-WIN64A"
+        Output-OpenSSL  "win64" "release"
+    }
+}
+else {
+    Write-Error "Unknown platform: $platform"
+    Exit
+}
 
 # Package with NuGet
 
