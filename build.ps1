@@ -206,15 +206,6 @@ function Compile-OpenSSL {
     # Set up nasm
     $env:Path = "$NASM_DIRECTORY;" + $env:Path
 
-    # Configure
-    #$target = "<invalid>"
-
-    #if ($configuration -eq "debug") {
-    #    $target = "debug-VC-WIN64"
-    #} else {
-    #    $target = "VC-WIN64"
-    #}
-
     perl Configure $target --prefix="bin/$winplatform/$configuration"
     
     # Run nasm
