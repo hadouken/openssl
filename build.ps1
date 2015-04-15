@@ -1,6 +1,8 @@
 # This script will download and build OpenSSL in debug, release
 # or both configurations for Win32 or x64.
 #
+# Requires PowerShell version 3.0 or newer
+#
 # Usage:
 # ------
 # build.ps1 [-vs_version 120 | 110 | 100 | 90]
@@ -239,6 +241,15 @@ function Output-OpenSSL {
     xcopy /y bin\$winplatform\$configuration\lib\*.lib "$t\lib\$configuration\*"
     xcopy /y bin\$winplatform\$configuration\include\* "$t\include\*" /E
 
+    $d = ""
+    $b = "32"
+
+    if ($configuration -eq "debug") { $d = "d" }
+    if ($winplatform -eq "win64") { $b = "64" }
+
+    Rename-Item -path "$t\bin\$configuration\libeay32.dll" -newname "libeay$b$d.dll"
+    Rename-Item -path "$t\bin\$configuration\ssleay32.dll" -newname "ssleay$b$d.dll"
+
     popd
 }
 
@@ -285,8 +296,10 @@ else {
 
 # Package with NuGet
 
-copy hadouken.openssl.nuspec $OUTPUT_DIRECTORY
+$p = "32"
+if ($platform -eq "x64") { $p = "64" }
+copy "hadouken$p.openssl.nuspec" $OUTPUT_DIRECTORY
 
 pushd $OUTPUT_DIRECTORY
-Start-Process "$NUGET_TOOL" -ArgumentList "pack hadouken.openssl.nuspec -Properties version=$VERSION" -Wait -NoNewWindow
+Start-Process "$NUGET_TOOL" -ArgumentList "pack hadouken$p.openssl.nuspec -Properties version=$VERSION" -Wait -NoNewWindow
 popd
